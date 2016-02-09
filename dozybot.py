@@ -9,13 +9,10 @@ import re
 import datetime
 from os import path, listdir
 import os
-import pprint
 import urllib
 import traceback
 import json
-
-with open("json/blacklist.json", encoding='utf-8', mode="r") as f:
-    blacklisted_users = json.loads(f.read())
+import dataIO
 
 youtube_dl_options = {
 	'format': 'bestaudio/best',
@@ -30,6 +27,8 @@ youtube_dl_options = {
 	'outtmpl': "music/%(id)s"}
 greetings = ["Hey.", "Yes?", "Hi.", "I'm listening.", "Hello.", "I'm here.", "Mmhmm?"]
 greetings_caps = ["DON'T SCREAM", "WHAT", "WHAT IS IT?!", "ì_ì", "NO CAPS LOCK"]
+thanks = ["You're welcome.", "You are welcome.", "No problem.", "Anytime"]
+thanks_caps = ["STOP YELLING", "YEAH, WHATEVER"]
 
 client = discord.Client()
 
@@ -63,21 +62,29 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    # if message.author.id in blacklisted_users and not isMemberAdmin(message):
-    #     return False
+    if message.author.id in blacklisted_users and not isMemberAdmin(message):
+        return True
+
     global greetings
     global greetings_caps
+    global thanks
     global option
     global dsave
     global imagesList
     member = discord.utils.find(lambda m: m.name == message.author.name , message.channel.server.members)
 
+    ######################## hello? ########################
     if message.content == client.user.name.upper() or message.content == client.user.name.upper() + "?":
         await client.send_message(message.channel, "`" + choice(greetings_caps) + "`")
     elif message.content.lower() == client.user.name.lower() + "?":
         await client.send_message(message.channel, "`" + choice(greetings) + "`")
     elif message.content == client.user.mention + " ?" or message.content == client.user.mention + "?":
         await client.send_message(message.channel, "`" + choice(greetings) + "`")
+    ######################## Thanks ########################
+    elif "THANKS, " + client.user.name.upper() in message.content or "THANKS " + client.user.name.upper() in message.content:
+        await client.send_message(message.channel, "`" + choice(thanks_caps) + "`")
+    elif "thanks, " + client.user.name.lower() in message.content.lower() or "thanks " + client.user.name.lower() in message.content.lower():
+        await client.send_message(message.channel, "`" + choice(thanks) + "`")
     ######################## Help ########################
     elif message.content.startswith('!help'):
         await client.send_message(message.author, bot_help)
@@ -132,7 +139,16 @@ async def on_message(message):
         await leaveVoice()
     elif message.content.lower().startswith('!volume'):
         await setVolume(message)
-        #Images
+    elif message.content.lower().startswith('!convertplaylist'):
+        await client.send_message(message.channel, "`Use http://soundiiz.com to convert a spotify playlist to a youtube one.`")
+    ######################## Admin Commands ########################
+    elif message.content.lower().startswith('!blacklist '):
+        await blacklist(message, "add")
+    elif message.content.lower().startswith('!forgive'):
+        await blacklist(message, "remove")
+    elif message.content.lower().startswith('!blacklist'):
+        await blacklist(message, "fack")
+    ######################## Images ########################
     else:
         for image in imagesList:
             imagelower = image.lower()[:-4]
@@ -190,7 +206,7 @@ async def checkVoice(message):
         else:
             await client.send_message(message.channel, "{} `You need to join a voice channel first.`".format(message.author.mention))
             return False
-    elif client.is_voice_connected() != message.author.voice_channel:
+    elif client.voice.channel != message.author.voice_channel:
         if message.author.voice_channel:
             if message.author.voice_channel.permissions_for(message.server.me).connect:
                 await client.voice.disconnect()
@@ -355,6 +371,42 @@ async def shen(message):
 async def whatsUp(message):
     await client.send_message(message.channel, 'The sky.')
 
+#ADMIN
+async def blacklist(message, mode):
+    global blacklisted_users
+    if isMemberAdmin(message):
+        if message.mentions:
+            member = message.mentions[0]
+        else:
+            if len(message.content.split(" ")) >= 2:
+                if message.content.startswith("!blacklist"):
+                    name = message.content[11:]
+                elif message.content.startswith("!forgive"):
+                    name = message.content[9:]
+                member = discord.utils.get(message.server.members, name=name)
+                if member == None:
+                    await client.send_message(message.channel, "`User not found.`")
+                    return False
+            else:
+                await client.send_message(message.author, blacklisted_users)
+                return False
+        if mode == "add":
+            blacklisted_users.update({member.id : "True"})
+            await client.send_message(message.channel, "`{} is now in blacklist.`".format(member.name))
+        elif mode == "remove":
+            if member.id in blacklisted_users:
+                del blacklisted_users[member.id]
+                await client.send_message(message.channel, "`{} has been removed from blacklist.`".format(member.name))
+            else:
+                await client.send_message(message.channel, "`User not in blacklist.`")
+                return False
+        else:
+            await client.send_message(message.author, blacklisted_users)
+            return False
+        dataIO.fileIO("json/blacklist.json", "save", blacklisted_users)
+    else:
+        await client.send_message(message.channel, "`I don't take orders from you.`")
+
 @client.async_event
 def on_ready():
     logger.info("I'm online " + "(" + client.user.id + ")")
@@ -387,8 +439,12 @@ def loggerSetup():
     return logger
 
 def loadDataFromFiles():
-    global imagesList
+    global imagesList, blacklisted_users
     loadHelp()
+
+    blacklisted_users = dataIO.fileIO("json/blacklist.json", "load")
+    logger.info("Loaded " + str(len(blacklisted_users)) + " blacklisted users.")
+
     imagesList = []
     for f in listdir('twitchimages/'):
         imagesList.append(f)
