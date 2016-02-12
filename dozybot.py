@@ -42,23 +42,29 @@ def loadHelp():
     global bot_help, audio_help
     bot_help = """**Command list**:
     !flip - I'll flip a coin.
-    !roll *number* - I'll roll a dice with the max number that you set.
+    !roll [number] - I'll roll a dice with the max number that you set.
     !choice - I'll choose the option (seperate options with commas \",\")
     !servers - Gets the servers I am connected to.
     !ts - Heres the IP for Envexia's TS...if its ever needed again.
-    !evajoin *link* - I'll join your server!
-    !goog *search* - Let me google that for you...
+    !evajoin [link] - I'll join your server!
+    !goog [search] - Let me google that for you...
 
     !help - I'll send you this help message
     !audio help - I'll send you help for the music I can play
     """
     audio_help = """**Audio help**:
-    !yt *youtubeLink* - I'll download the youtube audio and play it for you :)
+    !addplaylist [name] [link] - Adds a playlist to my list.
+    !delplaylist [name] - Deletes a playlist from my list. (Dont you dare touch someone elses :P)
+    !play [name] - Plays a playlist thats in my list.
+    !skip - Skips the current song in the playlist
+    !prev - Plays the previous song in the playlist.
+    !shuffle - Shuffles the songs around in the playlist.
+    !convertplaylist - Heres a link to a website that can convert your playlist into a youtube playlist!
     !pause - I'll hit the pause button if there is music on.
     !resume - I'll hit the resume button if there is music paused.
     !stop - bye :(
-    !volume *0.00-1.00* - Turn the music up! (or down)
-    !convertplaylist - Heres a link to a website that can convert your playlist into a youtube playlist!
+    !volume [0.00-1.00] - Turn the music up! (or down)
+    !yt [youtubeLink] - I'll download the youtube audio and play it for you :)
     """
 
 @client.async_event
@@ -149,6 +155,12 @@ async def on_message(message):
         if currentPlaylist: currentPlaylist.resume()
     elif message.content.lower().startswith('!stop'):
         await leaveVoice()
+    elif message.content.lower() == "!skip" or message.content.lower() == "!next":
+        if currentPlaylist: currentPlaylist.nextSong(currentPlaylist.getNextSong())
+    elif message.content.lower() == "!prev" or message.content.lower() == "!previous":
+        if currentPlaylist: currentPlaylist.nextSong(currentPlaylist.getPreviousSong())
+    elif message.content.lower() == "!shuffle":
+        if currentPlaylist: currentPlaylist.shuffle()
     elif message.content.lower().startswith('!volume'):
         await setVolume(message)
     elif message.content.lower().startswith('!convertplaylist'):
