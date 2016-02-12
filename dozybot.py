@@ -1,17 +1,20 @@
 #!/usr/bin/env python3.5
 import discord
 import asyncio
+import aiohttp
 import logging
 import youtube_dl
+import urllib
+from bs4 import BeautifulSoup
 from random import choice, randint, shuffle
-from botconfig import settings
 import re
-import datetime
+import time
 from os import path, listdir
 import os
-import urllib
 import traceback
 import json
+
+from botconfig import settings
 import dataIO
 
 youtube_dl_options = {
@@ -50,11 +53,12 @@ def loadHelp():
     !audio help - I'll send you help for the music I can play
     """
     audio_help = """**Audio help**:
-    !play *youtubeLink* - I'll download the youtube audio and play it for you :)
+    !yt *youtubeLink* - I'll download the youtube audio and play it for you :)
     !pause - I'll hit the pause button if there is music on.
     !resume - I'll hit the resume button if there is music paused.
     !stop - bye :(
     !volume *0.00-1.00* - Turn the music up! (or down)
+    !convertplaylist - Heres a link to a website that can convert your playlist into a youtube playlist!
     """
 
 @client.async_event
@@ -108,6 +112,8 @@ async def on_message(message):
         await coinFlip(message)
     elif message.content.startswith('!roll'):
         await roll(message)
+    elif '!proverb' in message.content.lower():
+        await client.send_message(message.channel, "`" + choice(proverbs) + "`")
     ######################## Utility ########################
     elif message.content.startswith('!servers'):
         await getServers(message)
@@ -129,8 +135,14 @@ async def on_message(message):
     elif message.content.lower().startswith('!whats up'):
         await whatsUp(message)
     ######################## Music ########################
-    elif message.content.lower().startswith('!youtube') or message.content.lower().startswith('!play'):
+    elif message.content.lower().startswith('!yt'):
         await playVideo(message)
+    elif message.content.lower().startswith('!play'):
+        await playPlaylist(message)
+    elif message.content.startswith("!addplaylist"):
+        await addPlaylist(message)
+    elif message.content.startswith("!delplaylist"):
+        await delPlaylist(message)
     elif message.content.lower().startswith('!pause'):
         if currentPlaylist: currentPlaylist.pause()
     elif message.content.lower().startswith('!resume'):
@@ -180,11 +192,105 @@ async def playVideo(message):
         if toDelete:
             await client.delete_message(toDelete)
 
+async def addPlaylist(message):
+    msg = message.content.split(" ")
+    if len(msg) == 3:
+        _, name, link = msg
+        if isPlaylistNameValid(name) and len(name) < 25 and isPlaylistLinkValid(link):
+            if dataIO.fileIO("playlists/" + name + ".json", "check"):
+                await client.send_message(message.channel, "`A playlist with that name already exists.`")
+                return False
+            links = await parsePlaylist(link)
+            if links:
+                data = { "author" : message.author.id, "playlist": links}
+                dataIO.fileIO("playlists/" + name + ".json", "save", data)
+                await client.send_message(message.channel, "`Playlist added. Name: {}`".format(name))
+            else:
+                await client.send_message(message.channel, "`Something went wrong. Either the link was incorrect or I was unable to retrieve the page.`")
+        else:
+            await client.send_message(message.channel, "`Something is wrong with the playlist's link or its filename. Remember, the name must be with only numbers, letters and underscores. Link must be this format: https://www.youtube.com/playlist?list=PLaqmzXcdRXOSVrktmZ-SHzMW66kFixggq`")
+
+    else:
+        await client.send_message(message.channel, "`!addplaylist [name] [link]`")
+
+async def delPlaylist(message):
+    msg = message.content.split(" ")
+    if len(msg) == 2:
+        _, filename = msg
+        if dataIO.fileIO("playlists/" + filename + ".txt", "check"):
+            authorid = dataIO.fileIO("playlists/" + filename + ".txt", "load")["author"]
+            if message.author.id == authorid or isMemberAdmin(message):
+                os.remove("playlists/" + filename + ".txt")
+                await client.send_message(message.channel, "`Playlist {} removed.`".format(filename))
+            else:
+                await client.send_message(message.channel, "`Only the playlist's author and admins can do that.`")
+        else:
+            await client.send_message(message.channel, "`There is no playlist with that name.`")
+    else:
+        await client.send_message(message.channel, "`!delplaylist [name]`")
+
+def isPlaylistNameValid(name):
+	for l in name:
+		if l.isdigit() or l.isalpha() or l == "_":
+			pass
+		else:
+			return False
+	return True
+
+def isPlaylistLinkValid(link):
+    pattern = "^https:\/\/www.youtube.com\/playlist\?list=(.[^:/]*)"
+    rr = re.search(pattern, link, re.I | re.U)
+    if not rr == None:
+        return rr.group(1)
+    else:
+        return False
+
+async def playPlaylist(message, sing=False):
+    global musicPlayer, currentPlaylist
+    msg = message.content
+    toDelete = None
+    if msg != "!play":
+        if await checkVoice(message):
+            msg = message.content[6:]
+            if dataIO.fileIO("playlists/" + msg + ".json", "check"):
+                stopMusic()
+                data = {"filename" : msg, "type" : "playlist"}
+                if settings["DOWNLOADMODE"]:
+                    toDelete = await client.send_message(message.channel, "`I'm in download mode. It might take a bit for me to start and switch between tracks. I'll delete this message as soon as the current playlist stops.`".format(id, message.author.name))
+                currentPlaylist = Playlist(data)
+                await asyncio.sleep(2)
+                await currentPlaylist.songSwitcher()
+                if toDelete:
+                    await client.delete_message(toDelete)
+            else:
+                await client.send_message(message.channel, "{} `That playlist doesn't exist.`".format(message.author.mention))
+
+
 async def getTitle(url):
     try:
         yt = youtube_dl.YoutubeDL(youtube_dl_options)
         v = yt.extract_info(url, download=False)
         return v['title']
+    except:
+        return False
+
+async def parsePlaylist(url):
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
+    try:
+        page = await aiohttp.post(url, headers=headers)
+        page = await page.text()
+
+        #page = requests.get(url, headers=headers)
+        soup = BeautifulSoup(page, 'html.parser')
+        tags = soup.find_all("tr", class_="pl-video yt-uix-tile ")
+        links = []
+
+        for tag in tags:
+            links.append("https://www.youtube.com/watch?v=" + tag['data-video-id'])
+        if links != []:
+            return links
+        else:
+            return False
     except:
         return False
 
@@ -241,6 +347,16 @@ async def setVolume(message):
     else:
         await(client.send_message(message.channel, "`Volume must be between 0 and 1. Example: !volume 0.15`"))
 
+def isPlaylistValid(data):
+    data = [y for y in data if y != ""] # removes all empty elements
+    data = [y for y in data if y != "\n"]
+    for link in data:
+        pattern = "^(https:\/\/www\.youtube\.com\/watch\?v=...........*)|^(https:\/\/youtu.be\/...........*)|^(https:\/\/youtube\.com\/watch\?v=...........*)"
+        rr = re.search(pattern, link, re.I | re.U)
+        if rr == None:
+            return False
+    return True
+
 class Playlist():
     def __init__(self, filename=None):
         self.filename = filename
@@ -249,13 +365,60 @@ class Playlist():
         self.lastAction = 999
         self.currentTitle = ""
         self.type = filename["type"]
-        if filename["type"] == "singleSong":
+        if filename["type"] == "playlist":
+            self.playlist = dataIO.fileIO("playlists/" + filename["filename"] + ".json", "load")["playlist"]
+        elif filename["type"] == "queue":
+            self.playlist = dataIO.fileIO("json/queue.json", "load")
+        elif filename["type"] == "favorites":
+            self.playlist = dataIO.fileIO("favorites/" + filename["filename"] + ".json", "load")
+        elif filename["type"] == "local":
+            self.playlist = filename["filename"]
+        elif filename["type"] == "singleSong":
             self.playlist = [filename["filename"]]
-            self.playSong(self.playlist[0])
+            self.playSingleSong(self.playlist[0])
         else:
             raise("Invalid playlist call.")
+        if filename["type"] != "singleSong":
+            self.nextSong(0)
 
-    def playSong(self, url):
+    def nextSong(self, nextTrack, lastError=False):
+        global musicPlayer
+        if not self.passedTime() < 1 and not self.stop: #direct control
+            if musicPlayer: musicPlayer.stop()
+            self.lastAction = int(time.perf_counter())
+            try:
+                if isPlaylistValid([self.playlist[nextTrack]]): #Checks if it's a valid youtube link
+                    if settings["DOWNLOADMODE"]:
+                        path = self.getVideo(self.playlist[nextTrack])
+                        try:
+                            logger.info("Starting track...")
+                            musicPlayer = client.voice.create_ffmpeg_player("music/" + path, options='''-filter:a "volume={}"'''.format(settings["VOLUME"]))
+                            musicPlayer.start()
+                        except:
+                            logger.warning("Something went wrong with track " + self.playlist[self.current])
+                            if not lastError: #prevents error loop
+                                self.lastAction = 999
+                            self.nextSong(self.getNextSong(), lastError=True)
+                    else: #Stream mode. Buggy.
+                        musicPlayer = client.voice.create_ytdl_player(self.playlist[nextTrack], options=youtube_dl_options)
+                        musicPlayer.start()
+                else: # must be a local playlist then
+                    musicPlayer = client.voice.create_ffmpeg_player(self.playlist[nextTrack], options='''-filter:a "volume={}"'''.format(settings["VOLUME"]))
+                    musicPlayer.start()
+            except Exception as e:
+                print("here!")
+                logger.warning("Something went wrong with track " + self.playlist[self.current])
+                if not lastError: #prevents error loop
+                    self.lastAction = 999
+                self.nextSong(self.getNextSong(), lastError=True)
+
+    async def songSwitcher(self):
+        while not self.stop:
+            if musicPlayer.is_done() and not self.stop:
+                self.nextSong(self.getNextSong())
+            await asyncio.sleep(0.5)
+
+    def playSingleSong(self, url):
         global musicPlayer
         if settings["DOWNLOADMODE"]:
             v = self.getVideo(url)
@@ -288,6 +451,16 @@ class Playlist():
             logger.error(e)
             return False
 
+    def getNextSong(self):
+        try:
+            song = self.playlist[self.current+1]
+            self.current += 1
+            return self.current
+        except: #if the current song was the last song, returns the first in the playlist
+            song = self.playlist[0]
+            self.current = 0
+            return self.current
+
     def passedTime(self):
         return abs(self.lastAction - int(time.perf_counter()))
 
@@ -299,6 +472,9 @@ class Playlist():
         if not self.stop:
             musicPlayer.resume()
 
+    def shuffle(self):
+        if not self.stop:
+            shuffle(self.playlist)
 
 async def randomChoice(message):
     choices = message.content[8:].split(',')
@@ -423,6 +599,11 @@ def isMemberAdmin(message):
 def canDeleteMessages(message):
     return message.channel.permissions_for(message.server.me).manage_messages
 
+def loadProverbs():
+    with open("proverbs.txt", encoding='utf-8', mode="r") as f:
+        data = f.readlines()
+    return data
+
 def loggerSetup():
     #api wrapper
     logger = logging.getLogger('discord')
@@ -439,11 +620,14 @@ def loggerSetup():
     return logger
 
 def loadDataFromFiles():
-    global imagesList, blacklisted_users
+    global proverbs ,imagesList, blacklisted_users
     loadHelp()
 
     blacklisted_users = dataIO.fileIO("json/blacklist.json", "load")
     logger.info("Loaded " + str(len(blacklisted_users)) + " blacklisted users.")
+
+    proverbs = loadProverbs()
+    logger.info("Loaded " + str(len(proverbs)) + " proverbs.")
 
     imagesList = []
     for f in listdir('twitchimages/'):
@@ -451,12 +635,14 @@ def loadDataFromFiles():
     logger.info("loaded files.")
 
 def main():
-    global settings, logger, client, musicPlayer, currentPlaylist, imagesList
+    global settings, logger, client, musicPlayer, currentPlaylist, imagesList, uptime_timer
 
     logger = loggerSetup()
+    dataIO.logger = logger
 
     loadDataFromFiles()
 
+    uptime_timer = int(time.perf_counter())
     musicPlayer = None
     currentPlaylist = None
 
