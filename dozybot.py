@@ -138,19 +138,25 @@ async def on_message(message):
         await dozy(message)
     elif message.content.lower().startswith('!shen'):
         await shen(message)
+    elif message.content.lower() == 'hodor' or message.content.lower() == 'hodor.':
+        await client.send_file(message.channel, 'images/hodor.jpg')
     elif message.content.lower().startswith('!whats up'):
         await whatsUp(message)
     ######################## Music ########################
     elif message.content.lower().startswith('!yt'):
         await playVideo(message)
-    elif message.content.lower().startswith('!play'):
+    elif message.content.lower().startswith('!play '):
         await playPlaylist(message)
     elif message.content.startswith("!addplaylist"):
         await addPlaylist(message)
     elif message.content.startswith("!delplaylist"):
         await delPlaylist(message)
+    elif message.content.startswith("!updplaylist"):
+        await delPlaylist(message)
+        await addPlaylist(message)
     elif message.content.lower().startswith('!pause'):
         if currentPlaylist: currentPlaylist.pause()
+        await client.send_message(message.channel, "`Paused. !resume to start again.`")
     elif message.content.lower().startswith('!resume'):
         if currentPlaylist: currentPlaylist.resume()
     elif message.content.lower().startswith('!stop'):
@@ -159,12 +165,18 @@ async def on_message(message):
         if currentPlaylist: currentPlaylist.nextSong(currentPlaylist.getNextSong())
     elif message.content.lower() == "!prev" or message.content.lower() == "!previous":
         if currentPlaylist: currentPlaylist.nextSong(currentPlaylist.getPreviousSong())
+    elif message.content == "!repeat" or message.content == "!replay":
+        if currentPlaylist: currentPlaylist.nextSong(currentPlaylist.current)
     elif message.content.lower() == "!shuffle":
         if currentPlaylist: currentPlaylist.shuffle()
+        await client.send_message(message.channel, "`Shuffling...`")
     elif message.content.lower().startswith('!volume'):
         await setVolume(message)
     elif message.content.lower().startswith('!convertplaylist'):
         await client.send_message(message.channel, "`Use http://soundiiz.com to convert a spotify playlist to a youtube one.`")
+    elif message.content.lower().startswith('!listplay'):
+        await listPlaylists(message)
+        await client.send_message(message.channel, "{} `Check your DMs for the playlists list.`".format(message.author.mention))
     ######################## Admin Commands ########################
     elif message.content.lower().startswith('!blacklist '):
         await blacklist(message, "add")
@@ -229,10 +241,12 @@ async def delPlaylist(message):
     msg = message.content.split(" ")
     if len(msg) == 2:
         _, filename = msg
-        if dataIO.fileIO("playlists/" + filename + ".txt", "check"):
-            authorid = dataIO.fileIO("playlists/" + filename + ".txt", "load")["author"]
+    elif len(msg) == 3:
+        _, filename ,a = msg
+        if dataIO.fileIO("playlists/" + filename + ".json", "check"):
+            authorid = dataIO.fileIO("playlists/" + filename + ".json", "load")["author"]
             if message.author.id == authorid or isMemberAdmin(message):
-                os.remove("playlists/" + filename + ".txt")
+                os.remove("playlists/" + filename + ".json")
                 await client.send_message(message.channel, "`Playlist {} removed.`".format(filename))
             else:
                 await client.send_message(message.channel, "`Only the playlist's author and admins can do that.`")
@@ -240,6 +254,21 @@ async def delPlaylist(message):
             await client.send_message(message.channel, "`There is no playlist with that name.`")
     else:
         await client.send_message(message.channel, "`!delplaylist [name]`")
+
+async def listPlaylists(message):
+    msg = "Available playlists: \n\n```"
+    files = os.listdir("playlists/")
+    if files:
+        for i, f in enumerate(files):
+            if f.endswith(".json"):
+                if i % 4 == 0 and i != 0:
+                    msg = msg + f.replace(".json", "") + "\n"
+                else:
+                    msg = msg + f.replace(".json", "") + "\t"
+        msg += "```"
+        await client.send_message(message.author, msg)
+    else:
+        await client.send_message(message.author, "There are no playlists.")
 
 def isPlaylistNameValid(name):
 	for l in name:
@@ -257,7 +286,7 @@ def isPlaylistLinkValid(link):
     else:
         return False
 
-async def playPlaylist(message, sing=False):
+async def playPlaylist(message):
     global musicPlayer, currentPlaylist
     msg = message.content
     toDelete = None
@@ -522,7 +551,7 @@ async def joinServer(message):
     client.accept_invite(inviteLink)
 
 async def google(message):
-    query = urllib.parse.quote_plus(message.content[8:])
+    query = urllib.parse.quote_plus(message.content[6:])
     await client.send_message(message.channel, 'http://lmgtfy.com/?q='+query)
 
 async def liu(message):
@@ -554,7 +583,8 @@ async def shen(message):
     if (shenji == None):
         await client.send_message(message.channel, 'Shenji is not on this server.')
     else:
-        await client.send_message(message.channel, '{}, is better than liu.'.format(shenji.mention))
+        await client.send_message(message.channel, '{}\'s nose.'.format(shenji.mention))
+        await client.send_file(message.channel, 'images/jew.jpg')
 
 async def whatsUp(message):
     await client.send_message(message.channel, 'The sky.')
