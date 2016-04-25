@@ -688,7 +688,7 @@ def main():
     musicPlayer = None
     currentPlaylist = None
 
-    yield from client.login(settings["EMAIL"], settings["PASSWORD"])
+    yield from client.login(settings["EMAIL"])
     yield from client.connect()
 
 if __name__ == '__main__':
